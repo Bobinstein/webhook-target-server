@@ -6,7 +6,6 @@ import "dotenv/config";
 const senderEmail = process.env.SENDER_EMAIL;
 const emailPassword = process.env.EMAIL_PASSWORD;
 const SMTP_HOST_ADDRESS = process.env.SMTP_HOST_ADDRESS;
-
 const databasePath = "./src/database/emailCache.db";
 
 async function openDB() {
@@ -22,11 +21,9 @@ async function openDB() {
       content TEXT
     );
     CREATE TABLE IF NOT EXISTS recipients (
-      id INTEGER PRIMARY KEY,
-      email TEXT
+      email TEXT PRIMARY KEY
     );
     CREATE TABLE IF NOT EXISTS blockCache (
-      id INTEGER PRIMARY KEY,
       blockHeight INTEGER,
       content TEXT
     );
@@ -35,36 +32,49 @@ async function openDB() {
   return db;
 }
 
+async function withRetry<T>(operation: () => Promise<T>, maxRetries = 3, delay = 100): Promise<T> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      if (error.code === 'SQLITE_BUSY' && attempt < maxRetries) {
+        console.log(`SQLite busy, retrying operation (Attempt ${attempt} of ${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error('Max retries reached for database operation');
+}
+
 async function getRecipients() {
-  const db = await openDB();
-  const recipients = await db.all("SELECT email FROM recipients");
-  await db.close();
-  return recipients.map((row) => row.email);
+  return withRetry(async () => {
+    const db = await openDB();
+    const recipients = await db.all("SELECT email FROM recipients");
+    await db.close();
+    return recipients.map((row) => row.email);
+  });
 }
 
 async function getLastInsertedID() {
-  const db = await openDB();
-  const result = await db.get("SELECT last_insert_rowid() as id");
-  await db.close();
-  return result.id;
+  return withRetry(async () => {
+    const db = await openDB();
+    const result = await db.get("SELECT last_insert_rowid() as id");
+    await db.close();
+    return result.id;
+  });
 }
 
 async function cacheEmail(subject: string, text: string) {
-  const db = await openDB();
-  await db.run("INSERT INTO emailCache (subject, content) VALUES (?, ?)", [
-    subject,
-    text,
-  ]);
-  await db.close();
+  return withRetry(async () => {
+    const db = await openDB();
+    await db.run("INSERT INTO emailCache (subject, content) VALUES (?, ?)", [subject, text]);
+    await db.close();
+  });
 }
 
-async function sendMailWithRetry(
-  id: number,
-  to: string,
-  subject: string,
-  text: string,
-  retries: number
-) {
+async function sendMailWithRetry(id: number, to: string, subject: string, text: string, retries: number) {
   const transporter = senderEmail?.endsWith("@gmail.com")
     ? nodemailer.createTransport({
         service: "gmail",
@@ -74,7 +84,7 @@ async function sendMailWithRetry(
         },
       })
     : nodemailer.createTransport({
-        host: SMTP_HOST_ADDRESS, // Custom SMTP host address
+        host: SMTP_HOST_ADDRESS,
         port: 465,
         secure: true,
         auth: {
@@ -93,9 +103,11 @@ async function sendMailWithRetry(
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log("Email sent:", info.response);
-    const db = await openDB();
-    await db.run("DELETE FROM emailCache WHERE id = ?", [id]);
-    await db.close();
+    await withRetry(async () => {
+      const db = await openDB();
+      await db.run("DELETE FROM emailCache WHERE id = ?", [id]);
+      await db.close();
+    });
   } catch (error) {
     console.error("Error sending email:", error);
     if (retries < 3) {
@@ -108,44 +120,37 @@ async function sendMailWithRetry(
 }
 
 export async function cacheRequest(blockHeight: number, content: string) {
-  const db = await openDB();
-  await db.run("INSERT INTO blockCache (blockHeight, content) VALUES (?, ?)", [
-    blockHeight,
-    content,
-  ]);
-  await db.close();
+  return withRetry(async () => {
+    const db = await openDB();
+    await db.run("INSERT INTO blockCache (blockHeight, content) VALUES (?, ?)", [blockHeight, content]);
+    await db.close();
+  });
 }
 
 export async function processCachedRequests() {
-  const db = await openDB();
-  const cachedRequests = await db.all(
-    "SELECT blockHeight, content FROM blockCache"
-  );
-  await db.run("DELETE FROM blockCache");
-  await db.close();
+  const cachedRequests = await withRetry(async () => {
+    const db = await openDB();
+    const results = await db.all("SELECT blockHeight, content FROM blockCache");
+    await db.run("DELETE FROM blockCache");
+    await db.close();
+    return results;
+  });
 
-  // Define a type for the emailsByBlock object
   interface EmailsByBlock {
     [key: number]: string[];
   }
 
-  const emailsByBlock: EmailsByBlock = cachedRequests.reduce(
-    (acc, { blockHeight, content }) => {
-      if (!acc[blockHeight]) {
-        acc[blockHeight] = [];
-      }
-      acc[blockHeight].push(content);
-      return acc;
-    },
-    {} as EmailsByBlock
-  );
+  const emailsByBlock: EmailsByBlock = cachedRequests.reduce((acc, { blockHeight, content }) => {
+    if (!acc[blockHeight]) {
+      acc[blockHeight] = [];
+    }
+    acc[blockHeight].push(content);
+    return acc;
+  }, {});
 
   for (const [blockHeight, contents] of Object.entries(emailsByBlock)) {
-    const emailContent = contents.join("\n");
-    await sendEmail(
-      `New POST Requests for Block Height ${blockHeight}`,
-      emailContent
-    );
+    const emailContent = contents.join("\n\n");
+    await sendEmail(`New POST Requests for Block Height ${blockHeight}`, emailContent);
   }
 }
 
@@ -159,8 +164,6 @@ export async function sendEmail(subject: string, text: string) {
       await sendMailWithRetry(lastID, recipient, subject, text, 0);
     }
   } else {
-    console.error(
-      "Error: Unable to retrieve the last inserted ID from the database."
-    );
+    console.error("Error: Unable to retrieve the last inserted ID from the database.");
   }
 }
