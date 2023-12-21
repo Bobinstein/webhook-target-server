@@ -9,6 +9,8 @@ const port = 2016;
 
 app.use(bodyParser.json());
 
+let isProcessing = false;
+
 app.post('/add', async (req, res) => {
   try {
     if (req.headers.authorization === `Bearer ${process.env.ADMIN_PASSWORD}`) {
@@ -52,6 +54,12 @@ let timer: NodeJS.Timeout | null = null;
 
 app.post('/', async (req, res) => {
   try {
+
+    if (!isProcessing) {
+      isProcessing = true;
+      await processCachedRequests();
+      isProcessing = false;
+    }
     const txId = req.body.data?.id;
     const parentId = req.body.data?.parent_id;
 
