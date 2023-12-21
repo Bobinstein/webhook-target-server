@@ -72,7 +72,7 @@ app.post('/', async (req, res) => {
           await processCachedRequests();
           currentBlockHeight = undefined;
           timer = null;
-        }, 10000);
+        }, 30000);
       }
     }
     res.sendStatus(200);

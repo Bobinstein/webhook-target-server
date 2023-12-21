@@ -128,31 +128,41 @@ export async function cacheRequest(blockHeight: number, content: string) {
 }
 
 export async function processCachedRequests() {
-  const cachedRequests = await withRetry(async () => {
     const db = await openDB();
-    const results = await db.all("SELECT blockHeight, content FROM blockCache");
+    const cachedRequests = await db.all(
+      "SELECT blockHeight, content FROM blockCache"
+    );
     await db.run("DELETE FROM blockCache");
     await db.close();
-    return results;
-  });
-
-  interface EmailsByBlock {
-    [key: number]: string[];
-  }
-
-  const emailsByBlock: EmailsByBlock = cachedRequests.reduce((acc, { blockHeight, content }) => {
-    if (!acc[blockHeight]) {
-      acc[blockHeight] = [];
+  
+    interface EmailsByBlock {
+      [key: number]: string[];
     }
-    acc[blockHeight].push(content);
-    return acc;
-  }, {});
-
-  for (const [blockHeight, contents] of Object.entries(emailsByBlock)) {
-    const emailContent = contents.join("\n\n");
-    await sendEmail(`New POST Requests for Block Height ${blockHeight}`, emailContent);
+  
+    const emailsByBlock: EmailsByBlock = {};
+    let blocklessTransactions: string[] = [];
+  
+    for (const { blockHeight, content } of cachedRequests) {
+      if (blockHeight === null) {
+        blocklessTransactions.push(content);
+      } else {
+        if (!emailsByBlock[blockHeight]) {
+          emailsByBlock[blockHeight] = [];
+        }
+        emailsByBlock[blockHeight].push(content);
+      }
+    }
+  
+    for (const [blockHeight, contents] of Object.entries(emailsByBlock)) {
+      const emailContent = `Here are your notifications for block ${blockHeight}:\n` + contents.join("\n\n");
+      await sendEmail(`New POST Requests for Block Height ${blockHeight}`, emailContent);
+    }
+  
+    if (blocklessTransactions.length > 0) {
+      const blocklessContent = "We experienced some errors determining which block these items belongs to, but we wanted to make sure you don't miss out on your notifications:\n" + blocklessTransactions.join("\n\n");
+      await sendEmail("Notifications with Undetermined Block Height", blocklessContent);
+    }
   }
-}
 
 export async function sendEmail(subject: string, text: string) {
   await cacheEmail(subject, text);
