@@ -10,24 +10,32 @@ const port = 2016;
 app.use(bodyParser.json());
 
 app.post("/add", async (req, res) => {
-  const email = req.body.email;
-  if (email) {
-    console.log(`adding recipient ${email}`);
-    const response = await addRecipient(email);
-    res.send(response);
+  if (req.headers.authorization === `Bearer ${process.env.ADMIN_PASSWORD}`) {
+    const email = req.body.email;
+    if (email) {
+      console.log(`adding recipient ${email}`);
+      const response = await addRecipient(email);
+      res.send(response);
+    } else {
+      res.status(400).send("No email provided");
+    }
   } else {
-    res.status(400).send("No email provided");
+    res.status(401).send("Unauthorized");
   }
 });
 
 app.post("/remove", async (req, res) => {
-  const email = req.body.email;
-  if (email) {
-    console.log(`removing recipient ${email}`);
-    const response = await removeRecipient(email);
-    res.send(response);
+  if (req.headers.authorization === `Bearer ${process.env.ADMIN_PASSWORD}`) {
+    const email = req.body.email;
+    if (email) {
+      console.log(`removing recipient ${email}`);
+      const response = await removeRecipient(email);
+      res.send(response);
+    } else {
+      res.status(400).send("No email provided");
+    }
   } else {
-    res.status(400).send("No email provided");
+    res.status(401).send("Unauthorized");
   }
 });
 
