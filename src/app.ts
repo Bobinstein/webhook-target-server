@@ -45,8 +45,10 @@ let timer: NodeJS.Timeout | null = null;
 app.post("/", async (req, res) => {
   try {
     const txId = req.body.data?.id;
+    const parentId = req.body.data?.parent_id; // Get the parent ID from request body
+
     if (txId) {
-      const blockHeight = await getBlockHeight(txId);
+      const blockHeight = await getBlockHeight(txId, parentId);
 
       if (blockHeight && blockHeight !== currentBlockHeight) {
         if (timer) {
@@ -71,6 +73,7 @@ app.post("/", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
