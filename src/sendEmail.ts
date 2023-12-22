@@ -182,7 +182,8 @@ function formatRequestData(requestData: any): string {
 
 // Function to process cached requests and send emails
 export async function processCachedRequests() {
-  const db = await openDB();
+    try 
+  {const db = await openDB();
   const cachedRequests = await db.all(
     "SELECT blockHeight, content FROM blockCache"
   );
@@ -212,6 +213,9 @@ export async function processCachedRequests() {
       `New POST Requests for Block Height ${blockHeight}`,
       emailContent
     );
+  }}
+  catch (error: any){
+    console.log(`Error: ${error}`)
   }
 }
 
