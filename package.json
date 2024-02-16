@@ -1,4 +1,6 @@
 {
+  "name": "webhook-email-server",
+  "description": "Simple server that listens for webhooks from a, ar.io gateway and uses them to send notification emails",
   "dependencies": {
     "@types/body-parser": "^1.19.5",
     "@types/express": "^4.17.21",
