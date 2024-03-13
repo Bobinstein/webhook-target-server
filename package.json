@@ -18,6 +18,7 @@
     "build": "tsc"
   },
   "devDependencies": {
+    "@permaweb/aoconnect": "^0.0.44",
     "@types/nodemailer": "^6.4.14",
     "typescript": "^5.3.3"
   }

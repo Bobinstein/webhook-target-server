@@ -1,170 +1,84 @@
 import express from "express";
-import bodyParser from "body-parser";
-import { addRecipient, removeRecipient } from "./manageRecipients";
-import { sendEmail, cacheRequest, processCachedRequests } from "./sendEmail";
-import { getBlockHeight } from "./getBlockHeight";
+const { Client, GatewayIntentBits } = require('discord.js');
 import "dotenv/config";
-const { Client, Events, GatewayIntentBits } = require('discord.js');
-import Arweave from "arweave";
+const {
+  message,
+  createDataItemSigner
+} = require("@permaweb/aoconnect");
+const fs = require("fs")
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const app = express();
-const port = 2016;
+const port = 2017;
+const wallet = JSON.parse(fs.readFileSync("../KeyFile.json").toString())
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]  }); 
-client.login(DISCORD_TOKEN)
+app.use(express.json()); // For parsing application/json
+app.use(express.urlencoded({ extended: true }));
 
-interface Tag {
-  name: string;
-  value: string;
-}
-interface RequestBody {
-  data: {
-    id: string;
-    owner: string;
-    tags: Tag[];
-  };
-}
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]  });
+const prefix = "^"
 
-const arweave = Arweave.init({
-  host: "arweave.net",
-  port: 443,
-  protocol: 'https'
+client.on('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+
+
+client.on("messageCreate", async function(Message: any) {
+  if(Message.author.username == 'bobinstein'){
+    const contents = Message.content.replace("<@977981426177814558> ", "")
+    console.log(contents)
+
+    await message({
+      process: "Bwfa-NTF2oHy9fVbcB5vYgI7h9N9W-FBqkFv1BM5PjM",
+
+      tags: [
+        {name: "Origin", value: "MyDiscordBot"},
+        {name: "Author", value: Message.author.username}
+      ],
+
+      signer: createDataItemSigner(wallet),
+
+      data: contents
+    }).then(console.log)
+
+
+  }
+  else {
+    console.log("gotta parse better.")
+    console.log(Message.author.username)
+  }
 })
 
-app.use(bodyParser.json());
 
-// let isProcessing = false;
 
-app.post("/add", async (req, res) => {
-  try {
-    if (req.headers.authorization === `Bearer ${process.env.ADMIN_PASSWORD}`) {
-      const email = req.body.email;
-      if (email) {
-        const response = await addRecipient(email);
-        res.send(response);
-      } else {
-        res.status(400).send("No email provided");
-      }
-    } else {
-      res.status(401).send("Unauthorized");
-    }
-  } catch (error) {
-    console.error("Error in /add endpoint:", error);
-    res.status(500).send("Internal Server Error");
-  }
-});
 
-app.post("/remove", async (req, res) => {
-  try {
-    if (req.headers.authorization === `Bearer ${process.env.ADMIN_PASSWORD}`) {
-      const email = req.body.email;
-      if (email) {
-        const response = await removeRecipient(email);
-        res.send(response);
-      } else {
-        res.status(400).send("No email provided");
-      }
-    } else {
-      res.status(401).send("Unauthorized");
-    }
-  } catch (error) {
-    console.error("Error in /remove endpoint:", error);
-    res.status(500).send("Internal Server Error");
-  }
-});
 
-let currentBlockHeight: number | undefined;
-let timer: NodeJS.Timeout | null = null;
+app.post("/discord", async (req: any, res: any) => {
 
-app.post("/", async (req, res) => {
-  
-  const body: RequestBody = req.body;
+  console.log(req.body)
+const channel = client.channels.cache.get(CHANNEL_ID);
+await channel.send(`ao process ${req.body.From} sent the message: \n${req.body.Data}`)
 
-  try {
-    // Assuming req.body is properly typed as discussed previously
-    const body: RequestBody = req.body;
-    console.log(body);
-    const address = await arweave.wallets.ownerToAddress(body.data.owner)
-    // Step 1: Filter for 'Input' tags and decode them
-    const inputs = body.data.tags
-      .filter((tag: Tag) => Buffer.from(tag.name, 'base64').toString('ascii') === 'Input')
-      .map((tag: Tag) => ({
-        name: Buffer.from(tag.name, 'base64').toString('ascii'),
-        value: Buffer.from(tag.value, 'base64').toString('ascii')
-      }));
+res.sendStatus(200)
+})
 
-    // Step 2: Check if there's exactly one 'Input' tag
-    if (inputs.length === 1) {
-      // Step 3: Parse the single 'Input' value into JSON
-      const inputValue = JSON.parse(inputs[0].value);
+app.get("/discord", async (req: any, res: any) => {
+  res.status(200).send("FUUUUUUUUUUUUUCK")
+})
 
-      // Further processing here
-      // For example, let's say you just log this value for now
-      console.log(inputValue);
+app.get("/", async (req: any, res: any) => {
+console.log("something connected")
+res.status(200).send("This one works")
+})
 
-      // Example of posting to Discord, customize as needed
-      const channel = client.channels.cache.get(CHANNEL_ID);
-      if (channel && 'send' in channel) {
-        const messageToSend = `Contract interaction received with id: ${body.data.id}\nWallet '${address}' attempted to ${inputValue.function}`;
-        await channel.send(messageToSend);
-        res.sendStatus(200);
-      } else {
-        res.status(500).send("Channel not found or is not a text channel");
-      }
-    } else {
-      // If there are not exactly one 'Input', do nothing or handle as needed
-      console.log("Found multiple or no 'Input' tags, doing nothing.");
-      res.sendStatus(200); // Or choose an appropriate response
-    }
-  } catch (error) {
-    console.error('Error in / (root) endpoint:', error);
-    res.status(500).send('Internal Server Error');
-  }
 
-  // try {
 
-  //   console.log(req.body)
-  //   if (!isProcessing) {
-  //     isProcessing = true;
-  //     await processCachedRequests();
-  //     isProcessing = false;
-  //   }
-  //   const txId = req.body.data?.id;
-  //   const parentId = req.body.data?.parent_id;
-
-  //   if (txId) {
-  //     const blockHeight = await getBlockHeight(txId, parentId);
-
-  //     if (blockHeight && blockHeight !== currentBlockHeight) {
-  //       if (timer) {
-  //         clearTimeout(timer);
-  //         await processCachedRequests();
-  //       }
-  //       currentBlockHeight = blockHeight;
-  //     }
-
-  //     if (!blockHeight){
-  //       console.log("No block height found, so we got here.")
-  //     }
-
-  //     if (currentBlockHeight) {
-  //       await cacheRequest(currentBlockHeight, JSON.stringify(req.body));
-  //       timer = setTimeout(async () => {
-  //         await processCachedRequests();
-  //         currentBlockHeight = undefined;
-  //         timer = null;
-  //       }, 120000);
-  //     }
-  //   }
-  //   res.sendStatus(200);
-  // } catch (error) {
-  //   console.error('Error in / (root) endpoint:', error);
-  //   res.status(500).send('Internal Server Error');
-  // }
-});
 
 app.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
+
+
+client.login(DISCORD_TOKEN)
